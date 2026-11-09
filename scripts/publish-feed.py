@@ -17,11 +17,21 @@ def gh(*args, check=True):
     return subprocess.run(["gh", *args, "--repo", REPO], check=check, capture_output=True, text=True)
 
 
-def verify_candidate(xml, tag, archive, public_key):
+def release_identity(tag):
+    match = re.fullmatch(r"v([0-9]+\.[0-9]+\.[0-9]+)(?:-(beta|dev))?-build([1-9][0-9]*)", tag)
+    if match:
+        base, suffix, build = match.groups()
+        channel = suffix or "public"
+        return channel, base + (f"-{suffix}" if suffix else ""), build
+    # Retain recovery support for releases published before display suffixes.
     match = re.fullmatch(r"(public|beta|dev)-v([0-9]+(?:\.[0-9]+){0,2})-build([1-9][0-9]*)", tag)
-    if not match:
-        raise ValueError("Only numbered app releases can update a feed")
-    channel, version, build = match.groups()
+    if match:
+        return match.groups()
+    raise ValueError("Only numbered app releases can update a feed")
+
+
+def verify_candidate(xml, tag, archive, public_key):
+    channel, version, build = release_identity(tag)
     root = ET.fromstring(xml)
     items = root.findall("channel/item")
     if len(items) != 1:
@@ -50,10 +60,9 @@ def verify_candidate(xml, tag, archive, public_key):
 
 def main():
     tag = os.environ["RELEASE_TAG"]
-    if not re.fullmatch(r"(public|beta|dev)-v[0-9]+(?:\.[0-9]+){0,2}-build[1-9][0-9]*", tag):
-        raise ValueError("Invalid release tag")
+    channel, _, _ = release_identity(tag)
     release = json.loads(gh("release", "view", tag, "--json", "isDraft,isPrerelease").stdout)
-    if release["isDraft"] or release["isPrerelease"] != (not tag.startswith("public-")):
+    if release["isDraft"] or release["isPrerelease"] != (channel != "public"):
         raise ValueError("Release visibility/channel mismatch")
     with tempfile.TemporaryDirectory() as directory:
         directory = Path(directory)

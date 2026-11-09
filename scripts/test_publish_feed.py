@@ -29,6 +29,21 @@ class CandidateTests(unittest.TestCase):
         length="{self.archive.stat().st_size}" sparkle:edSignature="{base64.b64encode(signature).decode()}" />
         </item></channel></rss>'''.encode()
 
+    def test_suffix_release_identity_and_legacy_recovery(self):
+        for suffix, channel in [("-dev", "dev"), ("-beta", "beta"), ("", "public")]:
+            tag = f"v0.1.0{suffix}-build13"
+            self.assertEqual(publisher.release_identity(tag), (channel, f"0.1.0{suffix}", "13"))
+        self.assertEqual(publisher.release_identity("dev-v0.0.1-build12"), ("dev", "0.0.1", "12"))
+        for tag in ["v0.1.0-ai-build13", "v0.1.0-beta-build0", "v0.1.0-build13;id"]:
+            with self.assertRaises(ValueError):
+                publisher.release_identity(tag)
+
+    def test_suffix_archive_is_accepted(self):
+        for suffix, channel in [("-dev", "dev"), ("-beta", "beta"), ("", "public")]:
+            tag = f"v0.1.0{suffix}-build12"
+            xml = self.xml.replace(b"dev-v0.0.1-build12", tag.encode()).replace(b">0.0.1<", f">0.1.0{suffix}<".encode())
+            self.assertEqual(publisher.verify_candidate(xml, tag, self.archive, self.public_key), (channel, 12))
+
     def test_valid_archive_is_accepted(self):
         self.assertEqual(publisher.verify_candidate(self.xml, 'dev-v0.0.1-build12', self.archive, self.public_key), ('dev', 12))
 
