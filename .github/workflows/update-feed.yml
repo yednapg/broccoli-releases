@@ -1,0 +1,30 @@
+name: Update published channel feed
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published numbered release tag to verify and promote
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: feed-${{ startsWith(inputs.tag || github.event.release.tag_name, 'dev-') && 'dev' || startsWith(inputs.tag || github.event.release.tag_name, 'beta-') && 'beta' || 'public' }}
+  cancel-in-progress: false
+jobs:
+  feed:
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.release.tag_name, 'updates-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test feed verification
+        run: python3 -B scripts/test_publish_feed.py
+      - name: Verify archive and update only its channel feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: python3 scripts/publish-feed.py
