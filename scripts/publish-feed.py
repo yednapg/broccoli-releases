@@ -18,7 +18,7 @@ def gh(*args, check=True):
 
 
 def release_identity(tag):
-    match = re.fullmatch(r"v([0-9]+\.[0-9]+\.[0-9]+)(?:-(beta|dev))?-build([1-9][0-9]*)", tag)
+    match = re.fullmatch(r"v([0-9]+\.[0-9]+\.[0-9]+)(?:-(beta|dev))?(?:-build([1-9][0-9]*))?", tag)
     if match:
         base, suffix, build = match.groups()
         channel = suffix or "public"
@@ -30,8 +30,14 @@ def release_identity(tag):
     raise ValueError("Only numbered app releases can update a feed")
 
 
-def verify_candidate(xml, tag, archive, public_key):
+def verify_candidate(xml, tag, archive, public_key, expected_build=None):
     channel, version, build = release_identity(tag)
+    if build is None:
+        build = str(expected_build or '')
+    elif expected_build is not None and str(expected_build) != build:
+        raise ValueError('Build metadata does not match release tag')
+    if not re.fullmatch(r'[1-9][0-9]*', build):
+        raise ValueError('Clean release tag requires internal build metadata')
     root = ET.fromstring(xml)
     items = root.findall("channel/item")
     if len(items) != 1:
@@ -60,7 +66,7 @@ def verify_candidate(xml, tag, archive, public_key):
 
 def main():
     tag = os.environ["RELEASE_TAG"]
-    channel, _, _ = release_identity(tag)
+    channel, version, tag_build = release_identity(tag)
     release = json.loads(gh("release", "view", tag, "--json", "isDraft,isPrerelease").stdout)
     if release["isDraft"] or release["isPrerelease"] != (channel != "public"):
         raise ValueError("Release visibility/channel mismatch")
@@ -73,7 +79,15 @@ def main():
         if (directory / "SHA256SUMS").read_text().strip() != expected:
             raise ValueError("Archive checksum mismatch")
         xml = (directory / "candidate-appcast.xml").read_bytes()
-        channel, build = verify_candidate(xml, tag, archive, Path("SparklePublicKey.txt").read_text())
+        metadata_build = None
+        if tag_build is None:
+            gh("release", "download", tag, "--pattern", "metadata.json", "--dir", str(directory))
+            metadata = json.loads((directory / "metadata.json").read_text())
+            if (metadata.get("tag") != tag or metadata.get("channel") != channel
+                    or metadata.get("display_version") != version):
+                raise ValueError("Release metadata identity mismatch")
+            metadata_build = metadata["build"]
+        channel, build = verify_candidate(xml, tag, archive, Path("SparklePublicKey.txt").read_text(), metadata_build)
         feed_tag = f"updates-{channel}"
         existing = gh("release", "view", feed_tag, "--json", "assets", check=False)
         if existing.returncode == 0 and any(a["name"] == "appcast.xml" for a in json.loads(existing.stdout)["assets"]):

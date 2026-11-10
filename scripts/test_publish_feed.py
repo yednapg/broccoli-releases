@@ -44,6 +44,16 @@ class CandidateTests(unittest.TestCase):
             xml = self.xml.replace(b"dev-v0.0.1-build12", tag.encode()).replace(b">0.0.1<", f">0.1.0{suffix}<".encode())
             self.assertEqual(publisher.verify_candidate(xml, tag, self.archive, self.public_key), (channel, 12))
 
+    def test_clean_tags_require_matching_internal_build_metadata(self):
+        for suffix, channel in [("-dev", "dev"), ("-beta", "beta"), ("", "public")]:
+            tag = f"v0.1.0{suffix}"
+            self.assertEqual(publisher.release_identity(tag), (channel, f"0.1.0{suffix}", None))
+            xml = self.xml.replace(b"dev-v0.0.1-build12", tag.encode()).replace(b">0.0.1<", f">0.1.0{suffix}<".encode())
+            self.assertEqual(publisher.verify_candidate(xml, tag, self.archive, self.public_key, "12"), (channel, 12))
+            for expected in (None, "13", "0", "garbage"):
+                with self.assertRaises(ValueError):
+                    publisher.verify_candidate(xml, tag, self.archive, self.public_key, expected)
+
     def test_valid_archive_is_accepted(self):
         self.assertEqual(publisher.verify_candidate(self.xml, 'dev-v0.0.1-build12', self.archive, self.public_key), ('dev', 12))
 
